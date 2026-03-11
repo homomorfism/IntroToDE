@@ -1,0 +1,137 @@
+version: '3.8'
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 10
+    _PIP_ADDITIONAL_REQUIREMENTS: ''
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./data:/opt/airflow/data
+    - ./processed:/opt/airflow/processed
+  user: "${AIRFLOW_UID:-50000}:0"
+
+services:
+  # PostgreSQL for Airflow metadata
+  postgres-airflow:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-airflow-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # PostgreSQL as target database for ETL
+  postgres-target:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: etl_user
+      POSTGRES_PASSWORD: etl_password
+      POSTGRES_DB: fuel_station
+    volumes:
+      - postgres-target-data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "etl_user", "-d", "fuel_station"]
+      interval: 5s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # Airflow initialization
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        echo "Waiting for database to be ready..."
+        while ! airflow db check 2>/dev/null; do
+          sleep 2
+        done
+        echo "Initializing Airflow database..."
+        airflow db migrate
+        echo "Creating admin user..."
+        airflow users create \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com \
+          --password admin || true
+        echo "Adding PostgreSQL connection..."
+        airflow connections add 'postgres_target' \
+          --conn-type 'postgres' \
+          --conn-host 'postgres-target' \
+          --conn-schema 'fuel_station' \
+          --conn-login 'etl_user' \
+          --conn-password 'etl_password' \
+          --conn-port '5432' || true
+        echo "Initialization complete!"
+    user: "${AIRFLOW_UID:-50000}:0"
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      postgres-target:
+        condition: service_healthy
+
+  # Airflow webserver
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      postgres-target:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Airflow scheduler
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      postgres-target:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-airflow-data:
+  postgres-target-data:

@@ -1,0 +1,8 @@
+# Requirements for the data generator
+faker>=18.0.0
+pyarrow>=14.0.0
+
+# Requirements for Airflow DAG (installed in container)
+# pandas
+# psycopg2-binary
+# sqlalchemy

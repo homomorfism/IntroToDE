@@ -8,3 +8,8 @@ dependencies = [
     "faker>=40.5.1",
     "tqdm>=4.67.3",
 ]
+
+[tool.uv.workspace]
+members = [
+    "lab05",
+]
