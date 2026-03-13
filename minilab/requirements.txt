@@ -1,0 +1,3 @@
+aiokafka
+fastavro>=1.12.1
+pyspark==3.5.0

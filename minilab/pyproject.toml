@@ -1,0 +1,11 @@
+[project]
+name = "minilab"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9.10"
+dependencies = [
+    "aiokafka",
+    "fastavro>=1.12.1",
+    "pyspark",
+]
