@@ -4,3 +4,5 @@ out/
 .ipynb_checkpoints
 processed/
 data/
+minilab/checkpoint_hsutest
+.venv/
